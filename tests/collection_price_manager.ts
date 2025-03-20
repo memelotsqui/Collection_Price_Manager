@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Keypair, LAMPORTS_PER_SOL, Connection, clusterApiUrl } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, createMint, getOrCreateAssociatedTokenAccount } from "@solana/spl-token";
 import fs from "fs";
 import { assert } from "chai";
@@ -9,13 +9,15 @@ import BN from "bn.js"; // Ensure BN is imported
 describe("collection_price_manager", () => {
 
   const connection = new anchor.web3.Connection("http://localhost:8899", "confirmed");
+  
+  //const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
   const wallet = anchor.Wallet.local(); // Loads local keypair
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
   anchor.setProvider(provider);
   
-  
+  //console.log(wallet.secre)
 
-  const secretKeyString = fs.readFileSync("/mnt/d/Github/anchorWorld/localnet-test-wallets/localnet-2.json", { encoding: "utf8" });
+  const secretKeyString = fs.readFileSync("/mnt/d/Github/anchorWorld/wallets/localnet-test-wallets/localnet-2.json", { encoding: "utf8" });
   const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
   const keypair = Keypair.fromSecretKey(secretKey);
 
@@ -36,7 +38,7 @@ describe("collection_price_manager", () => {
     console.log("Payer Balance (SOL):", balance / 1_000_000_000);
     if (balance < 0.5){
       console.log("low balance airdropping");
-      await airdropSol(payerPubKey);
+      //await airdropSol(payerPubKey);
     }
     console.log(keypair.publicKey)
   }
