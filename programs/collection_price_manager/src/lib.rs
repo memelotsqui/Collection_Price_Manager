@@ -16,32 +16,33 @@ pub mod collection_price_manager {
     pub fn update_prices(ctx: Context<UpdatePrices>, new_prices: Vec<u64>) -> Result<()> {
         let price_data = &mut ctx.accounts.collection_prices;
         let owner = &ctx.accounts.owner;
-
+    
         require_keys_eq!(price_data.owner, owner.key(), ErrorCode::Unauthorized);
-
-        price_data.size = new_prices.len() as u16;
+        require_eq!(new_prices.len(), price_data.size as usize, ErrorCode::SizeMismatch);
+    
         price_data.prices = new_prices;
-
         Ok(())
     }
 
     // Initialize the PDA for the first time (only collection owner can do this)
     pub fn initialize_collection_prices(
         ctx: Context<InitializeCollectionPrices>,
-        payment_mint: Pubkey, // New parameter for the token mint
+        collection_address: Pubkey, 
+        payment_mint: Pubkey,
         size: u16,
         prices: Vec<u64>,
     ) -> Result<()> {
         let price_data = &mut ctx.accounts.collection_prices;
         let owner = &ctx.accounts.owner;
-    
+        
         require_eq!(prices.len(), size as usize, ErrorCode::SizeMismatch);
-    
+        
         price_data.owner = owner.key();
+        price_data.collection_address = collection_address;
         price_data.size = size;
         price_data.payment_mint = payment_mint;
         price_data.prices = prices;
-    
+        
         Ok(())
     }
 }
@@ -49,39 +50,49 @@ pub mod collection_price_manager {
 #[account]
 pub struct CollectionPrices {
     pub owner: Pubkey,         // Collection owner
-    pub size: u16,             // Number of items in the collection
-    pub payment_mint: Pubkey,  // The SPL token accepted for payment (e.g., USDC)
-    pub prices: Vec<u64>,      // Prices in the token's smallest unit (e.g., 6 decimals for USDC)
+    pub collection_address: Pubkey, // Collection identifier
+    pub size: u16,             
+    pub payment_mint: Pubkey,
+    pub prices: Vec<u64>,
 }
 
 // Initialize the PDA (Only collection owner can do this)
 #[derive(Accounts)]
 pub struct InitializeCollectionPrices<'info> {
-    #[account(init, payer = owner, space = 8 + 32 + 2 + (4 + 100 * 8), 
-        seeds = [b"prices", owner.key().as_ref()], bump)]
+    #[account(init, payer = owner, space = 8 + 32 + 32 + 2 + (4 + 100 * 8),
+        seeds = [b"prices", collection_address.key().as_ref()], bump)]
     pub collection_prices: Account<'info, CollectionPrices>,
 
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub owner: Signer<'info>,  // Must be the creator
 
     pub system_program: Program<'info, System>,
+
+    /// CHECK: This account is only used for deriving the PDA and is not read or written to.
+    pub collection_address: AccountInfo<'info>, 
 }
 
 // Fetch Prices from PDA
 #[derive(Accounts)]
 pub struct FetchPrices<'info> {
-    #[account(seeds = [b"prices", collection_prices.owner.as_ref()], bump)]
+    #[account(seeds = [b"prices", collection_address.key().as_ref()], bump)]
     pub collection_prices: Account<'info, CollectionPrices>,
+
+    /// CHECK: This account is only used for deriving the PDA and is not read or written to.
+    pub collection_address: AccountInfo<'info>, 
 }
 
 // Update Prices (Only Owner)
 #[derive(Accounts)]
 pub struct UpdatePrices<'info> {
-    #[account(mut, has_one = owner, seeds = [b"prices", collection_prices.owner.as_ref()], bump)]
+    #[account(mut, has_one = owner, seeds = [b"prices", collection_address.key().as_ref()], bump)]
     pub collection_prices: Account<'info, CollectionPrices>,
 
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub owner: Signer<'info>,  // Must be the owner
+
+    /// CHECK: This account is only used for deriving the PDA and is not read or written to.
+    pub collection_address: AccountInfo<'info>, 
 }
 
 // Error Codes

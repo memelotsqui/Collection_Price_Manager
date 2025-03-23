@@ -4,82 +4,60 @@ import { PublicKey, SystemProgram, Keypair, LAMPORTS_PER_SOL, Connection, cluste
 import { TOKEN_PROGRAM_ID, createMint, getOrCreateAssociatedTokenAccount } from "@solana/spl-token";
 import fs from "fs";
 import { assert } from "chai";
-import BN from "bn.js"; // Ensure BN is imported
+import BN from "bn.js";
 
 describe("collection_price_manager", () => {
 
   const connection = new anchor.web3.Connection("http://localhost:8899", "confirmed");
-  
-  //const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
-  const wallet = anchor.Wallet.local(); // Loads local keypair
+  const wallet = anchor.Wallet.local();
   const provider = new anchor.AnchorProvider(connection, wallet, { commitment: "confirmed" });
   anchor.setProvider(provider);
-  
-  //console.log(wallet.secre)
 
   const secretKeyString = fs.readFileSync("/mnt/d/Github/anchorWorld/wallets/localnet-test-wallets/localnet-2.json", { encoding: "utf8" });
   const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
   const keypair = Keypair.fromSecretKey(secretKey);
 
-  console.log(secretKeyString);
-  console.log(keypair.publicKey);
-
-  async function airdropSol(payerPubKey: PublicKey) {
-    console.log("Requesting airdrop...");
-    const airdropSignature = await connection.requestAirdrop(payerPubKey, 2 * LAMPORTS_PER_SOL);
-    await connection.confirmTransaction(airdropSignature, "confirmed");
-
-    const newBalance = await connection.getBalance(payerPubKey);
-    console.log("Airdrop successful! New Balance (SOL):", newBalance / LAMPORTS_PER_SOL);
-  }
+  console.log("Keypair:", keypair.publicKey.toBase58());
 
   async function checkBalance(payerPubKey: PublicKey) {
     const balance = await connection.getBalance(payerPubKey);
-    console.log("Payer Balance (SOL):", balance / 1_000_000_000);
-    if (balance < 0.5){
-      console.log("low balance airdropping");
-      //await airdropSol(payerPubKey);
-    }
-    console.log(keypair.publicKey)
+    console.log("Payer Balance (SOL):", balance / LAMPORTS_PER_SOL);
   }
-
-  
-
-  // const keypairPath = ""
-
-  // const secret = new Uint8Array(JSON.parse(fs.readFileSync(keypairPath)));
 
   const program = anchor.workspace.CollectionPriceManager as Program;
 
   let collectionPricesPDA: PublicKey;
-  let owner = keypair.publicKey;
+  let collectionAddress: PublicKey;
   let usdcMint: PublicKey;
   let ownerTokenAccount: PublicKey;
 
-  
-
   before(async () => {
     await checkBalance(keypair.publicKey);
+    
+    // Simulate a collection address (for testing)
+    collectionAddress = anchor.web3.Keypair.generate().publicKey;
+    console.log("Collection Address:", collectionAddress.toBase58());
+
     // Create a new USDC token for testing
     usdcMint = await createMint(
       provider.connection,
       keypair,
-      owner,
+      keypair.publicKey,
       null,
-      6 // USDC typically has 6 decimals
+      6
     );
 
-    // Create owner's token account to receive payments
+    // Create token account for payments
     ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
       provider.connection,
       keypair,
       usdcMint,
-      owner
+      keypair.publicKey
     ).then(acc => acc.address);
 
-    // Derive PDA for collection prices
+    // Derive PDA for collection prices using collection address
     const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("prices"), owner.toBuffer()],
+      [Buffer.from("prices"), collectionAddress.toBuffer()],
       program.programId
     );
     collectionPricesPDA = pda;
@@ -89,25 +67,33 @@ describe("collection_price_manager", () => {
 
   it("Initializes collection prices", async () => {
     const size = 3;
-    const prices = [new BN(1000000), new BN(2000000), new BN(1500000)]; // USDC amounts in micro-units
-
+    const prices = [new BN(1000000), new BN(2000000), new BN(1500000)];
+  
     const tx = await program.methods
-      .initializeCollectionPrices(usdcMint, size, prices)
+      .initializeCollectionPrices(collectionAddress, usdcMint, size, prices)
       .accounts({
         collectionPrices: collectionPricesPDA,
-        owner: owner,
+        collectionAddress: collectionAddress,
+        owner: keypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
+      .signers([keypair])
       .rpc();
-
+  
     console.log("✅ Initialized collection prices:", tx);
-
-    // Fetch and verify stored data
+  
     const data = await program.account.collectionPrices.fetch(collectionPricesPDA);
+    
     assert.strictEqual(data.size, size);
-    assert.deepStrictEqual(data.prices.map(Number), prices);
+  
+    // Convert both to strings for comparison
+    assert.deepStrictEqual(data.prices.map(price => price.toString()), prices.map(price => price.toString()));
+  
     assert.strictEqual(data.paymentMint.toBase58(), usdcMint.toBase58());
   });
+  
+
+  
 
   it("Fetches collection prices", async () => {
     const data = await program.account.collectionPrices.fetch(collectionPricesPDA);
@@ -115,38 +101,46 @@ describe("collection_price_manager", () => {
     assert.strictEqual(data.size, 3);
   });
 
-  it("Only owner can modify prices", async () => {
+  it("Updates prices", async () => {
     const newPrices = [new BN(5000000), new BN(7000000), new BN(8000000)];
-
+  
     await program.methods
       .updatePrices(newPrices)
       .accounts({
         collectionPrices: collectionPricesPDA,
-        owner: owner,
+        collectionAddress: collectionAddress,
+        owner: keypair.publicKey,
       })
+      .signers([keypair])
       .rpc();
-
+  
     const updatedData = await program.account.collectionPrices.fetch(collectionPricesPDA);
-    assert.deepStrictEqual(updatedData.prices.map(Number), newPrices);
+  
+    // Convert to string for comparison
+    assert.deepStrictEqual(updatedData.prices.map(price => price.toString()), newPrices.map(price => price.toString()));
   });
-
-  it("Fails when unauthorized user tries to modify prices", async () => {
+  
+  it("Prevents unauthorized updates", async () => {
     const newPrices = [new BN(1000000), new BN(2000000), new BN(3000000)];
     const fakeUser = anchor.web3.Keypair.generate();
-
+  
     try {
       await program.methods
         .updatePrices(newPrices)
         .accounts({
           collectionPrices: collectionPricesPDA,
-          owner: fakeUser.publicKey, // Unauthorized user
+          collectionAddress: collectionAddress,
+          owner: fakeUser.publicKey,
         })
         .signers([fakeUser])
         .rpc();
-      assert.fail("Should have thrown an error");
+  
+      assert.fail("Unauthorized update should fail.");
     } catch (err) {
       console.log("✅ Unauthorized update prevented:", err.message);
+  
+      // Ensure the error contains the expected constraint violation message
       assert.include(err.message, "Constraint has one of constraints was violated");
     }
-  });
+  });  
 });
