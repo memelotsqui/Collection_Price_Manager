@@ -7,13 +7,13 @@ pub mod collection_price_manager {
     use super::*;
 
     // Fetch collection size & prices
-    pub fn fetch_prices(ctx: Context<FetchPrices>, collection_address: Pubkey) -> Result<(u16, Pubkey, Vec<u64>)> {
+    pub fn fetch_prices(ctx: Context<FetchPrices>) -> Result<(u16, Pubkey, Vec<u64>)> {
         let price_data = &ctx.accounts.collection_prices;
         Ok((price_data.size, price_data.payment_mint, price_data.prices.clone()))
     }
 
     // Update prices (only collection owner can modify)
-    pub fn update_prices(ctx: Context<UpdatePrices>, collection_address: Pubkey, new_prices: Vec<u64>) -> Result<()> {
+    pub fn update_prices(ctx: Context<UpdatePrices>, new_prices: Vec<u64>) -> Result<()> {
         let price_data = &mut ctx.accounts.collection_prices;
         let owner = &ctx.accounts.owner;
     

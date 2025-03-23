@@ -68,24 +68,32 @@ describe("collection_price_manager", () => {
   it("Initializes collection prices", async () => {
     const size = 3;
     const prices = [new BN(1000000), new BN(2000000), new BN(1500000)];
-
+  
     const tx = await program.methods
-      .initializeCollectionPrices(usdcMint, size, prices)
+      .initializeCollectionPrices(collectionAddress, usdcMint, size, prices)
       .accounts({
         collectionPrices: collectionPricesPDA,
         collectionAddress: collectionAddress,
         owner: keypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
+      .signers([keypair])
       .rpc();
-
+  
     console.log("✅ Initialized collection prices:", tx);
-
+  
     const data = await program.account.collectionPrices.fetch(collectionPricesPDA);
+    
     assert.strictEqual(data.size, size);
-    assert.deepStrictEqual(data.prices.map(Number), prices);
+  
+    // Convert both to strings for comparison
+    assert.deepStrictEqual(data.prices.map(price => price.toString()), prices.map(price => price.toString()));
+  
     assert.strictEqual(data.paymentMint.toBase58(), usdcMint.toBase58());
   });
+  
+
+  
 
   it("Fetches collection prices", async () => {
     const data = await program.account.collectionPrices.fetch(collectionPricesPDA);
@@ -95,7 +103,7 @@ describe("collection_price_manager", () => {
 
   it("Updates prices", async () => {
     const newPrices = [new BN(5000000), new BN(7000000), new BN(8000000)];
-
+  
     await program.methods
       .updatePrices(newPrices)
       .accounts({
@@ -103,30 +111,36 @@ describe("collection_price_manager", () => {
         collectionAddress: collectionAddress,
         owner: keypair.publicKey,
       })
+      .signers([keypair])
       .rpc();
-
+  
     const updatedData = await program.account.collectionPrices.fetch(collectionPricesPDA);
-    assert.deepStrictEqual(updatedData.prices.map(Number), newPrices);
+  
+    // Convert to string for comparison
+    assert.deepStrictEqual(updatedData.prices.map(price => price.toString()), newPrices.map(price => price.toString()));
   });
-
+  
   it("Prevents unauthorized updates", async () => {
     const newPrices = [new BN(1000000), new BN(2000000), new BN(3000000)];
     const fakeUser = anchor.web3.Keypair.generate();
-
+  
     try {
       await program.methods
         .updatePrices(newPrices)
         .accounts({
           collectionPrices: collectionPricesPDA,
           collectionAddress: collectionAddress,
-          owner: fakeUser.publicKey, 
+          owner: fakeUser.publicKey,
         })
         .signers([fakeUser])
         .rpc();
+  
       assert.fail("Unauthorized update should fail.");
     } catch (err) {
       console.log("✅ Unauthorized update prevented:", err.message);
+  
+      // Ensure the error contains the expected constraint violation message
       assert.include(err.message, "Constraint has one of constraints was violated");
     }
-  });
+  });  
 });
