@@ -41,9 +41,25 @@ pub mod collection_price_manager {
             price_data.size as usize,
             ErrorCode::SizeMismatch
         );
+
+        // Validate prices
+        for price in &new_prices {
+            require_gt!(*price, 0, ErrorCode::InvalidPrice);
+            // Check if price is less than 1 SOL (1_000_000_000 lamports)
+            if *price >= 1_000_000_000_000_000 {
+                return Err(ErrorCode::PriceTooHigh.into());
+            }
+        }
     
         // Actually update the data
         price_data.prices = new_prices;
+    
+        // Emit price update event
+        emit!(PriceUpdateEvent {
+            collection: price_data.collection_address,
+            owner: owner.key(),
+            timestamp: Clock::get()?.unix_timestamp,
+        });
     
         Ok(())
     }
@@ -90,18 +106,26 @@ pub mod collection_price_manager {
             tree_config: &ctx.accounts.tree_config.to_account_info(),
             merkle_tree: &ctx.accounts.merkle_tree.to_account_info(),
             payer: &ctx.accounts.owner.to_account_info(),
-            tree_creator: &ctx.accounts.owner.to_account_info(),
+            tree_creator: &ctx.accounts.mint_authority.to_account_info(),
             log_wrapper: &ctx.accounts.log_wrapper.to_account_info(),
             compression_program: &ctx.accounts.compression_program.to_account_info(),
             system_program: &ctx.accounts.system_program.to_account_info(),
         };
+    
+        // Sign with the mint authority PDA
+        let binding = ctx.accounts.collection_address.key();
+        let signer_seeds = &[
+            b"mint_authority",
+            binding.as_ref(),
+            &[ctx.bumps.mint_authority],
+        ];
     
         CreateTreeConfigCpi::new(
             &ctx.accounts.bubblegum_program.to_account_info(),
             cpi_accounts,
             tree_config,
         )
-        .invoke()?;
+        .invoke_signed(&[signer_seeds])?;
     
         Ok(())
     }
@@ -112,17 +136,17 @@ pub mod collection_price_manager {
         max_buffer_size: u32,
     ) -> Result<()> {
         let price_data = &mut ctx.accounts.collection_prices;
-        let tree_index = &mut ctx.accounts.merkle_tree_index;
         let owner = &ctx.accounts.owner;
     
         // Make sure caller is the collection owner
         require_keys_eq!(price_data.owner, owner.key(), ErrorCode::Unauthorized);
     
-        // Reset Merkle tree index
-        tree_index.current_index = 0;
-    
         // Save the new Merkle tree address
         price_data.merkle_tree = ctx.accounts.new_merkle_tree.key();
+        let tree_index = &mut ctx.accounts.merkle_tree_index;
+
+        // Initialize Merkle Tree Index
+        tree_index.current_index = 0;
     
         // Create new tree config
         let tree_config = CreateTreeConfigInstructionArgs {
@@ -135,18 +159,25 @@ pub mod collection_price_manager {
             tree_config: &ctx.accounts.new_tree_config.to_account_info(),
             merkle_tree: &ctx.accounts.new_merkle_tree.to_account_info(),
             payer: &ctx.accounts.owner.to_account_info(),
-            tree_creator: &ctx.accounts.owner.to_account_info(),
+            tree_creator: &ctx.accounts.mint_authority.to_account_info(),
             log_wrapper: &ctx.accounts.log_wrapper.to_account_info(),
             compression_program: &ctx.accounts.compression_program.to_account_info(),
             system_program: &ctx.accounts.system_program.to_account_info(),
         };
+    
+        // Sign with the mint authority PDA
+        let signer_seeds = &[
+            b"mint_authority",
+            ctx.accounts.collection_prices.collection_address.as_ref(),
+            &[ctx.bumps.mint_authority],
+        ];
     
         CreateTreeConfigCpi::new(
             &ctx.accounts.bubblegum_program.to_account_info(),
             cpi_accounts,
             tree_config,
         )
-        .invoke()?;
+        .invoke_signed(&[signer_seeds])?;
     
         Ok(())
     }
@@ -186,7 +217,8 @@ pub struct RotateMerkleTree<'info> {
     #[account(mut, has_one = owner)]
     pub collection_prices: Account<'info, CollectionPrices>,
 
-    #[account(mut)]
+    #[account(init, payer = owner, space = 8 + 8,
+        seeds = [b"tree_index", new_merkle_tree.key().as_ref()], bump)]
     pub merkle_tree_index: Account<'info, MerkleTreeIndex>,
 
     /// CHECK: This is created by the CPI to Bubblegum
@@ -196,6 +228,10 @@ pub struct RotateMerkleTree<'info> {
     /// CHECK: Tree config will be initialized via CPI
     #[account(mut)]
     pub new_tree_config: UncheckedAccount<'info>,
+
+    /// CHECK: PDA signer for minting, derived from collection address
+    #[account(seeds = [b"mint_authority", collection_prices.collection_address.as_ref()], bump)]
+    pub mint_authority: AccountInfo<'info>,
 
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -210,8 +246,6 @@ pub struct RotateMerkleTree<'info> {
     pub compression_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
-
-
 }
 
 // Initialize the PDA (Only collection owner can do this)
@@ -225,6 +259,10 @@ pub struct InitializeCollectionPrices<'info> {
     #[account(init, payer = owner, space = 8 + 8,
         seeds = [b"tree_index", merkle_tree.key().as_ref()], bump)]
     pub merkle_tree_index: Account<'info, MerkleTreeIndex>,
+
+    /// CHECK: PDA signer for minting, derived from collection address
+    #[account(seeds = [b"mint_authority", collection_address.key().as_ref()], bump)]
+    pub mint_authority: AccountInfo<'info>,
 
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -287,4 +325,15 @@ pub enum ErrorCode {
     SizeMismatch,
     #[msg("Stored bump does not match derived bump.")]
     InvalidBump,
+    #[msg("Invalid price: Price must be greater than 0.")]
+    InvalidPrice,
+    #[msg("Price too high: Price must be less than 1 SOL.")]
+    PriceTooHigh,
+}
+
+#[event]
+pub struct PriceUpdateEvent {
+    pub collection: Pubkey,
+    pub owner: Pubkey,
+    pub timestamp: i64,
 }
