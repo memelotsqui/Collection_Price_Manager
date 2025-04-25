@@ -67,13 +67,13 @@ pub mod collection_price_manager {
     // Initialize the PDA for the first time (only collection owner can do this)
     pub fn initialize_collection_prices(
         ctx: Context<InitializeCollectionPrices>,
-        collection_address: Pubkey,
-        payment_mint: Pubkey,
+        // payment_mint: Pubkey,
         size: u16,
         prices: Vec<u64>,
         max_depth: u32,
         max_buffer_size: u32,
     ) -> Result<()> {
+        
         let collection_prices = &mut ctx.accounts.collection_prices;
         collection_prices.bump = ctx.bumps.collection_prices;
         collection_prices.owner = ctx.accounts.owner.key();
@@ -81,14 +81,15 @@ pub mod collection_price_manager {
         let owner = &ctx.accounts.owner;
         let price_data = &mut ctx.accounts.collection_prices;
         let tree_index = &mut ctx.accounts.merkle_tree_index;
+ 
     
         require_eq!(prices.len(), size as usize, ErrorCode::SizeMismatch);
     
         // Save price data
         price_data.owner = owner.key();
-        price_data.collection_address = collection_address;
+        price_data.collection_address = ctx.accounts.collection_address.key();
         price_data.size = size;
-        price_data.payment_mint = payment_mint;
+        //price_data.payment_mint = payment_mint;
         price_data.prices = prices;
         price_data.merkle_tree = ctx.accounts.merkle_tree.key();
     
@@ -120,12 +121,12 @@ pub mod collection_price_manager {
             &[ctx.bumps.mint_authority],
         ];
     
-        CreateTreeConfigCpi::new(
-            &ctx.accounts.bubblegum_program.to_account_info(),
-            cpi_accounts,
-            tree_config,
-        )
-        .invoke_signed(&[signer_seeds])?;
+        // CreateTreeConfigCpi::new(
+        //     &ctx.accounts.bubblegum_program.to_account_info(),
+        //     cpi_accounts,
+        //     tree_config,
+        // )
+        // .invoke_signed(&[signer_seeds])?;
     
         Ok(())
     }
