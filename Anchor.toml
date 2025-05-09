@@ -5,15 +5,15 @@ solana_version = "2.1.0"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
+[programs.devnet]
 collection_price_manager = "FV2936jpAPgHkguQeefLpMJm6hJdcmHLy2pDCNTb13Xv"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
-wallet = "~/.config/solana/id.json"
+cluster = "Devnet"
+wallet = "/mnt/d/Github/anchorWorld/wallets/devent-test-wallets/devenet-wallet-1.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
